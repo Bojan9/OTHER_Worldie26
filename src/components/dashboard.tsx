@@ -58,7 +58,7 @@ function Brand() {
   );
 }
 
-function ClerkAuthControls() {
+function ClerkAuthControls({ compact = false }: { compact?: boolean }) {
   const { isLoaded, isSignedIn } = useAuth();
   if (!isLoaded) return <div className="size-10 animate-pulse rounded-full bg-white/10" />;
   if (isSignedIn) return <UserButton />;
@@ -67,7 +67,10 @@ function ClerkAuthControls() {
     <SignInButton mode="modal">
       <Button
         variant="ghost"
-        className="h-9 px-4 font-bold text-slate-300 hover:bg-white/[0.07] hover:text-white"
+        className={cn(
+          "h-9 font-bold text-slate-300 hover:bg-white/[0.07] hover:text-white",
+          compact ? "w-full justify-between px-3 text-sm" : "px-4",
+        )}
       >
         Log in <ArrowRight className="size-3.5 text-lime-300" />
       </Button>
@@ -111,10 +114,12 @@ function Header({ section, setSection, configured, isAdmin }: { section: string;
             <Badge className="bg-amber-300/10 text-amber-200">Setup required</Badge>
           )}
         </div>
-        <Button variant="ghost" size="icon" className="text-white lg:hidden" onClick={() => setOpen(!open)}>
-          {open ? <X /> : <Menu />}
-          <span className="sr-only">Toggle navigation</span>
-        </Button>
+        <div className="flex items-center lg:hidden">
+          <Button variant="ghost" size="icon" className="text-white" onClick={() => setOpen(!open)}>
+            {open ? <X /> : <Menu />}
+            <span className="sr-only">Toggle navigation</span>
+          </Button>
+        </div>
       </div>
       {open ? (
         <nav className="grid gap-1 border-t border-white/10 px-5 py-4 lg:hidden">
@@ -128,6 +133,13 @@ function Header({ section, setSection, configured, isAdmin }: { section: string;
               <ShieldCheck className="size-4" /> Admin
             </Link>
           ) : null}
+          <div className="mt-2 border-t border-white/10 pt-3 sm:hidden">
+            {configured ? (
+              <ClerkAuthControls compact />
+            ) : (
+              <Badge className="bg-amber-300/10 text-amber-200">Setup required</Badge>
+            )}
+          </div>
         </nav>
       ) : null}
     </header>

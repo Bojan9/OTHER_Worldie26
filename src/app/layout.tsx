@@ -1,4 +1,3 @@
-import {ClerkProvider} from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppAuthProvider } from "@/components/app-auth-provider";
@@ -29,12 +28,10 @@ export default function RootLayout({
   return (
     <html lang="en" data-theme="usa" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className={geistSans.className}>
-        <ClerkProvider>
-          <AppAuthProvider>
-            {children}
-            <ThemePicker />
-          </AppAuthProvider>
-        </ClerkProvider>
+        <AppAuthProvider>
+          {children}
+          <ThemePicker />
+        </AppAuthProvider>
       </body>
     </html>
   );
