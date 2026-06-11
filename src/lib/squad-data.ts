@@ -1,6 +1,6 @@
 import "server-only";
 
-import { count, sql } from "drizzle-orm";
+import { asc, count, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { players } from "@/db/schema";
@@ -43,12 +43,113 @@ const rosterSchema = z.object({
   athletes: z.array(athleteSchema),
 });
 
+const sportsDbPlayerSchema = z.object({
+  strPlayer: z.string(),
+  strSport: z.string().nullable().optional(),
+  strThumb: z.string().nullable().optional(),
+  strCutout: z.string().nullable().optional(),
+});
+
+const sportsDbSearchSchema = z.object({
+  player: z.array(sportsDbPlayerSchema).nullable(),
+});
+
+const wikipediaSummarySchema = z.object({
+  description: z.string().optional(),
+  thumbnail: z.object({ source: z.string() }).optional(),
+  originalimage: z.object({ source: z.string() }).optional(),
+});
+
+function normalizedName(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("en")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
+    .trim();
+}
+
+async function getWikipediaFootballerImage(name: string) {
+  for (const title of [name, `${name} (footballer)`]) {
+    const response = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replaceAll(" ", "_"))}`,
+      {
+        headers: { "User-Agent": "Worldie26/1.0" },
+        next: { revalidate: 2_592_000 },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+    if (!response.ok) continue;
+    const summary = wikipediaSummarySchema.parse(await response.json());
+    if (!/footballer|soccer player/i.test(summary.description ?? "")) continue;
+    const imageUrl =
+      summary.thumbnail?.source ??
+      summary.originalimage?.source ??
+      null;
+    if (imageUrl) return imageUrl;
+  }
+  return null;
+}
+
+async function enrichMissingPlayerImages() {
+  const db = getDb();
+  const missingPlayers = await db
+    .select({
+      id: players.id,
+      name: players.name,
+    })
+    .from(players)
+    .where(isNull(players.imageUrl))
+    .orderBy(asc(players.updatedAt), asc(players.id))
+    .limit(40);
+
+  await Promise.all(
+    missingPlayers.map(async (player) => {
+      let imageUrl: string | null = null;
+      try {
+        const response = await fetch(
+          `https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?p=${encodeURIComponent(player.name)}`,
+          {
+            next: { revalidate: 604_800 },
+            signal: AbortSignal.timeout(8_000),
+          },
+        );
+        if (response.ok) {
+          const result = sportsDbSearchSchema.parse(await response.json());
+          const exactMatch = result.player?.find(
+            (candidate) =>
+              candidate.strSport === "Soccer" &&
+              normalizedName(candidate.strPlayer) === normalizedName(player.name),
+          );
+          imageUrl = exactMatch?.strCutout ?? exactMatch?.strThumb ?? null;
+        }
+        if (!imageUrl) {
+          imageUrl = await getWikipediaFootballerImage(player.name);
+        }
+      } catch {
+        // The next batch can retry this player after other missing rows are checked.
+      }
+
+      await db
+        .update(players)
+        .set({
+          ...(imageUrl ? { imageUrl } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(players.id, player.id));
+    }),
+  );
+}
+
 export async function syncWorldCupPlayers() {
   if (!process.env.DATABASE_URL) return;
 
   const db = getDb();
   const [stored] = await db.select({ value: count() }).from(players);
-  if ((stored?.value ?? 0) >= 1_200) return;
+  if ((stored?.value ?? 0) >= 1_200) {
+    await enrichMissingPlayerImages();
+    return;
+  }
 
   const teamsResponse = await fetch(ESPN_TEAMS_URL, {
     next: { revalidate: 86_400 },
@@ -113,4 +214,6 @@ export async function syncWorldCupPlayers() {
         updatedAt: sql`excluded.updated_at`,
       },
     });
+
+  await enrichMissingPlayerImages();
 }

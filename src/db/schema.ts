@@ -118,3 +118,15 @@ export const officialAwards = pgTable("official_awards", {
   youngPlayerId: text("young_player_id").references(() => players.id),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const fantasyTeams = pgTable("fantasy_teams", {
+  userId: text("user_id").primaryKey().references(() => users.id),
+  name: text("name").notNull(),
+  formation: text("formation").notNull(),
+  playerIds: jsonb("player_ids").$type<string[]>().notNull(),
+  starterIds: jsonb("starter_ids").$type<string[]>().notNull(),
+  captainId: text("captain_id").references(() => players.id),
+  period: text("period").default("group_1").notNull(),
+  baselinePlayerIds: jsonb("baseline_player_ids").$type<string[]>().default([]).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});

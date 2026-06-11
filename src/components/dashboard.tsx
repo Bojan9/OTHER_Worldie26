@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { TournamentGame } from "@/components/tournament-game";
 import { PublicTournamentPredictions } from "@/components/public-tournament-predictions";
 import { AwardsGame } from "@/components/awards-game";
+import { FantasyTeamGame } from "@/components/fantasy-team-game";
 import { TeamFlag } from "@/components/team-flag";
 import { saveMatchPrediction } from "@/app/actions";
 import type {
@@ -52,6 +53,7 @@ const nav = [
   { id: "Dashboard", label: "Почетна" },
   { id: "Tournament", label: "Турнир" },
   { id: "Awards", label: "Награди" },
+  { id: "Fantasy", label: "Фантази тим" },
   { id: "Matches", label: "Натпревари" },
   { id: "Leaderboard", label: "Табела" },
 ];
@@ -177,7 +179,7 @@ function SignInRequired({
   section,
   configured,
 }: {
-  section: "Турнир" | "Награди" | "Натпревари";
+  section: "Турнир" | "Награди" | "Натпревари" | "Фантази тим";
   configured: boolean;
 }) {
   return (
@@ -653,6 +655,11 @@ export function Dashboard({ data }: { data: AppData }) {
           ? data.signedIn
             ? <AwardsGame players={data.awardPlayers} savedPrediction={data.awardPrediction} currentTime={data.currentTime} />
             : <SignInRequired section="Награди" configured={data.configured} />
+          : null}
+        {section === "Fantasy"
+          ? data.signedIn
+            ? <FantasyTeamGame players={data.awardPlayers} savedTeam={data.fantasyTeam} context={data.fantasyContext} publicTeams={data.publicFantasyTeams} />
+            : <SignInRequired section="Фантази тим" configured={data.configured} />
           : null}
         {section === "Matches"
           ? data.signedIn

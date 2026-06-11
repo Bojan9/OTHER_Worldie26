@@ -7,12 +7,28 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import {
   awardPredictions,
+  fantasyTeams,
   matchPredictions,
   matches,
   players,
   tournamentPredictions,
   users,
 } from "@/db/schema";
+import {
+  FANTASY_BUDGET,
+  MAX_PLAYERS_PER_TEAM,
+  fantasyFormations,
+  fantasyPositionCounts,
+  countFantasyTransfers,
+  getFantasyPrice,
+  isFantasyPosition,
+  type FantasyFormation,
+  type FantasyPosition,
+} from "@/lib/fantasy";
+import {
+  assertFantasyTeamsEligible,
+  getFantasyContext,
+} from "@/lib/fantasy-context";
 import { canSubmitMatchPrediction } from "@/lib/scoring";
 import { groups } from "@/lib/tournament";
 
@@ -27,6 +43,14 @@ const awardSchema = z.object({
   goldenGlovePlayerId: z.string().min(1),
   goldenBallPlayerId: z.string().min(1),
   youngPlayerId: z.string().min(1),
+});
+
+const fantasyTeamSchema = z.object({
+  name: z.string().trim().min(2).max(40),
+  formation: z.enum(["4-4-2", "4-3-3", "3-5-2", "5-3-2", "3-4-3", "5-4-1"]),
+  playerIds: z.array(z.string().min(1)).length(16),
+  starterIds: z.array(z.string().min(1)).length(11),
+  captainId: z.string().min(1),
 });
 
 const teamCodes = new Set(groups.flatMap((group) => group.teams.map((team) => team.code)));
@@ -235,6 +259,155 @@ export async function saveAwardPrediction(input: z.input<typeof awardSchema>) {
       target: awardPredictions.userId,
       set: {
         ...prediction,
+        updatedAt: new Date(),
+      },
+    });
+
+  revalidatePath("/");
+  return { saved: true };
+}
+
+export async function saveFantasyTeam(
+  input: z.input<typeof fantasyTeamSchema>,
+) {
+  const fantasyTeam = fantasyTeamSchema.parse(input);
+  const uniquePlayerIds = [...new Set(fantasyTeam.playerIds)];
+  const uniqueStarterIds = [...new Set(fantasyTeam.starterIds)];
+
+  if (
+    uniquePlayerIds.length !== 16 ||
+    uniqueStarterIds.length !== 11 ||
+    uniqueStarterIds.some((id) => !uniquePlayerIds.includes(id))
+  ) {
+    throw new Error("Изборот мора да содржи 16 различни играчи и 11 стартери.");
+  }
+  if (!uniqueStarterIds.includes(fantasyTeam.captainId)) {
+    throw new Error("Капитенот мора да биде дел од почетните 11.");
+  }
+
+  const db = getDb();
+  const userId = await ensureCurrentUser(db);
+  const [selectedPlayers, existingRows, context] = await Promise.all([
+    db
+      .select({
+        id: players.id,
+        teamId: players.teamId,
+        position: players.position,
+        jerseyNumber: players.jerseyNumber,
+      })
+      .from(players)
+      .where(inArray(players.id, uniquePlayerIds)),
+    db
+      .select({
+        period: fantasyTeams.period,
+        playerIds: fantasyTeams.playerIds,
+        baselinePlayerIds: fantasyTeams.baselinePlayerIds,
+      })
+      .from(fantasyTeams)
+      .where(eq(fantasyTeams.userId, userId))
+      .limit(1),
+    getFantasyContext(),
+  ]);
+
+  if (
+    selectedPlayers.length !== 16 ||
+    selectedPlayers.some((player) => !isFantasyPosition(player.position))
+  ) {
+    throw new Error("Еден или повеќе од избраните играчи не се валидни.");
+  }
+
+  const squadCounts = Object.fromEntries(
+    Object.keys(fantasyPositionCounts).map((position) => [position, 0]),
+  ) as Record<FantasyPosition, number>;
+  const starterCounts = { ...squadCounts };
+  const teamCounts = new Map<string, number>();
+  const starterIdSet = new Set(uniqueStarterIds);
+  let totalPrice = 0;
+
+  for (const player of selectedPlayers) {
+    const position = player.position as FantasyPosition;
+    squadCounts[position] += 1;
+    if (starterIdSet.has(player.id)) starterCounts[position] += 1;
+    teamCounts.set(player.teamId, (teamCounts.get(player.teamId) ?? 0) + 1);
+    totalPrice += getFantasyPrice({
+      ...player,
+      position,
+    });
+  }
+
+  const formation =
+    fantasyFormations[fantasyTeam.formation as FantasyFormation];
+  if (
+    Object.entries(fantasyPositionCounts).some(
+      ([position, count]) => squadCounts[position as FantasyPosition] !== count,
+    )
+  ) {
+    throw new Error("Тимот мора да има 2 голмани, 5 дефанзивци, 5 играчи од средниот ред и 4 напаѓачи.");
+  }
+  if (
+    Object.entries(formation).some(
+      ([position, count]) => starterCounts[position as FantasyPosition] !== count,
+    )
+  ) {
+    throw new Error("Почетните 11 не одговараат на избраната формација.");
+  }
+  if ([...teamCounts.values()].some((count) => count > MAX_PLAYERS_PER_TEAM)) {
+    throw new Error("Може да изберете најмногу 3 играчи од една репрезентација.");
+  }
+  if (totalPrice > FANTASY_BUDGET) {
+    throw new Error("Избраниот тим го надминува буџетот од 160.0m.");
+  }
+  await assertFantasyTeamsEligible(
+    selectedPlayers.map((player) => player.teamId),
+    context,
+  );
+
+  const existing = existingRows[0];
+  const periodChanged = existing?.period !== context.period;
+  const baselinePlayerIds = !existing
+    ? uniquePlayerIds
+    : periodChanged
+      ? context.freshSquad
+        ? uniquePlayerIds
+        : existing.playerIds
+      : existing.baselinePlayerIds.length > 0
+        ? existing.baselinePlayerIds
+        : existing.playerIds;
+  const transfersUsed = countFantasyTransfers(
+    baselinePlayerIds,
+    uniquePlayerIds,
+  );
+  if (
+    context.maxTransfers != null &&
+    transfersUsed > context.maxTransfers
+  ) {
+    throw new Error(
+      `Во ${context.label} се дозволени најмногу ${context.maxTransfers} трансфери.`,
+    );
+  }
+
+  await db
+    .insert(fantasyTeams)
+    .values({
+      userId,
+      name: fantasyTeam.name,
+      formation: fantasyTeam.formation,
+      playerIds: uniquePlayerIds,
+      starterIds: uniqueStarterIds,
+      captainId: fantasyTeam.captainId,
+      period: context.period,
+      baselinePlayerIds,
+    })
+    .onConflictDoUpdate({
+      target: fantasyTeams.userId,
+      set: {
+        name: fantasyTeam.name,
+        formation: fantasyTeam.formation,
+        playerIds: uniquePlayerIds,
+        starterIds: uniqueStarterIds,
+        captainId: fantasyTeam.captainId,
+        period: context.period,
+        baselinePlayerIds,
         updatedAt: new Date(),
       },
     });

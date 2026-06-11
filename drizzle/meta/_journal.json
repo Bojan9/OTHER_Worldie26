@@ -29,6 +29,20 @@
       "when": 1781041842626,
       "tag": "0003_military_thunderball",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781189206478,
+      "tag": "0004_bright_timeslip",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781189794227,
+      "tag": "0005_damp_lizard",
+      "breakpoints": true
     }
   ]
 }

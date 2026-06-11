@@ -8,6 +8,21 @@ const nextConfig: NextConfig = {
         hostname: "flagcdn.com",
         pathname: "/w80/**",
       },
+      {
+        protocol: "https",
+        hostname: "r2.thesportsdb.com",
+        pathname: "/images/media/player/**",
+      },
+      {
+        protocol: "https",
+        hostname: "www.thesportsdb.com",
+        pathname: "/images/media/player/**",
+      },
+      {
+        protocol: "https",
+        hostname: "upload.wikimedia.org",
+        pathname: "/wikipedia/commons/**",
+      },
     ],
   },
 };

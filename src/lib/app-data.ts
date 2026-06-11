@@ -5,6 +5,7 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   awardPredictions,
+  fantasyTeams,
   matchPredictions,
   matches,
   players,
@@ -17,6 +18,11 @@ import { syncWorldCupPlayers } from "@/lib/squad-data";
 import { getUpcomingMatches } from "@/lib/sports-data";
 import { scoreMatchPrediction } from "@/lib/scoring";
 import { groups, type Match } from "@/lib/tournament";
+import {
+  countFantasyTransfers,
+  type FantasyPeriod,
+} from "@/lib/fantasy";
+import { getFantasyContext } from "@/lib/fantasy-context";
 
 export type PredictionSummary = {
   home: number;
@@ -93,6 +99,34 @@ export type AwardPredictionData = {
   updatedAt: string;
 };
 
+export type FantasyTeamData = {
+  name: string;
+  formation: string;
+  playerIds: string[];
+  starterIds: string[];
+  captainId: string | null;
+  period: string;
+  baselinePlayerIds: string[];
+  updatedAt: string;
+};
+
+export type FantasyContextData = {
+  period: FantasyPeriod;
+  label: string;
+  eligibleTeamIds: string[];
+  maxTransfers: number | null;
+  transfersUsed: number;
+  freshSquad: boolean;
+};
+
+export type PublicFantasyTeamData = FantasyTeamData & {
+  userId: string;
+  ownerName: string;
+  ownerInitials: string;
+  ownerAvatarUrl: string | null;
+  current: boolean;
+};
+
 export type AppData = {
   matches: Match[];
   nextMatches: Match[];
@@ -105,6 +139,9 @@ export type AppData = {
   tournamentLocked: boolean;
   awardPlayers: AwardPlayerData[];
   awardPrediction: AwardPredictionData | null;
+  fantasyTeam: FantasyTeamData | null;
+  fantasyContext: FantasyContextData;
+  publicFantasyTeams: PublicFantasyTeamData[];
   signedIn: boolean;
   isAdmin: boolean;
   configured: boolean;
@@ -507,6 +544,58 @@ async function getAwardData(userId: string | null) {
   };
 }
 
+async function getFantasyTeam(userId: string | null) {
+  if (!process.env.DATABASE_URL || !userId) return null;
+  const db = getDb();
+  const [fantasyTeam] = await db
+    .select({
+      name: fantasyTeams.name,
+      formation: fantasyTeams.formation,
+      playerIds: fantasyTeams.playerIds,
+      starterIds: fantasyTeams.starterIds,
+      captainId: fantasyTeams.captainId,
+      period: fantasyTeams.period,
+      baselinePlayerIds: fantasyTeams.baselinePlayerIds,
+      updatedAt: fantasyTeams.updatedAt,
+    })
+    .from(fantasyTeams)
+    .where(eq(fantasyTeams.userId, userId))
+    .limit(1);
+
+  return fantasyTeam
+    ? { ...fantasyTeam, updatedAt: fantasyTeam.updatedAt.toISOString() }
+    : null;
+}
+
+async function getPublicFantasyTeams(userId: string | null) {
+  if (!process.env.DATABASE_URL) return [];
+  const db = getDb();
+  const rows = await db
+    .select({
+      userId: fantasyTeams.userId,
+      ownerName: users.displayName,
+      ownerAvatarUrl: users.avatarUrl,
+      name: fantasyTeams.name,
+      formation: fantasyTeams.formation,
+      playerIds: fantasyTeams.playerIds,
+      starterIds: fantasyTeams.starterIds,
+      captainId: fantasyTeams.captainId,
+      period: fantasyTeams.period,
+      baselinePlayerIds: fantasyTeams.baselinePlayerIds,
+      updatedAt: fantasyTeams.updatedAt,
+    })
+    .from(fantasyTeams)
+    .innerJoin(users, eq(users.id, fantasyTeams.userId))
+    .orderBy(desc(fantasyTeams.updatedAt));
+
+  return rows.map((team) => ({
+    ...team,
+    ownerInitials: initials(team.ownerName),
+    current: team.userId === userId,
+    updatedAt: team.updatedAt.toISOString(),
+  }));
+}
+
 async function applyPersistedResults(schedule: Match[]) {
   if (!process.env.DATABASE_URL || schedule.length === 0) return schedule;
   const db = getDb();
@@ -540,6 +629,14 @@ export async function getAppData(): Promise<AppData> {
     .filter((match) => new Date(match.kickoff).getTime() > now)
     .slice(0, 3);
   const now = new Date(currentTime).getTime();
+  const fallbackFantasyContext: FantasyContextData = {
+    period: "group_1",
+    label: "Групна фаза · Коло 1",
+    eligibleTeamIds: groups.flatMap((group) => group.teams.map((team) => team.code)),
+    maxTransfers: null,
+    transfersUsed: 0,
+    freshSquad: true,
+  };
   if (!isAppConfigured()) {
     return {
       matches: schedule,
@@ -566,6 +663,9 @@ export async function getAppData(): Promise<AppData> {
         : true,
       awardPlayers: [],
       awardPrediction: null,
+      fantasyTeam: null,
+      fantasyContext: fallbackFantasyContext,
+      publicFantasyTeams: [],
       signedIn: false,
       isAdmin: false,
       configured: false,
@@ -584,12 +684,25 @@ export async function getAppData(): Promise<AppData> {
   const tournamentLockTime = schedule
     .map((match) => match.kickoff)
     .sort((left, right) => new Date(left).getTime() - new Date(right).getTime())[0] ?? null;
-  const [matchPredictionData, leaderboard, tournamentPrediction, awardData] = await Promise.all([
+  const [matchPredictionData, leaderboard, tournamentPrediction, awardData, fantasyTeam, fantasyContext, publicFantasyTeams] = await Promise.all([
     getMatchPredictionData(schedule.map((match) => match.id), userId),
     getLeaderboard(userId),
     getTournamentPrediction(userId),
     getAwardData(userId),
+    getFantasyTeam(userId),
+    getFantasyContext(new Date(currentTime)),
+    getPublicFantasyTeams(userId),
   ]);
+  const transferBaseline =
+    fantasyTeam?.period === fantasyContext.period
+      ? fantasyTeam.baselinePlayerIds
+      : fantasyContext.freshSquad
+        ? []
+        : fantasyTeam?.playerIds ?? [];
+  const transfersUsed =
+    fantasyTeam && transferBaseline.length > 0
+      ? countFantasyTransfers(transferBaseline, fantasyTeam.playerIds)
+      : 0;
 
   return {
     matches: schedule,
@@ -604,6 +717,12 @@ export async function getAppData(): Promise<AppData> {
       ? new Date(currentTime).getTime() >= new Date(tournamentLockTime).getTime()
       : true,
     ...awardData,
+    fantasyTeam,
+    fantasyContext: {
+      ...fantasyContext,
+      transfersUsed,
+    },
+    publicFantasyTeams,
     signedIn: Boolean(userId),
     isAdmin: currentUserData?.email === ADMIN_EMAIL,
     configured: true,
