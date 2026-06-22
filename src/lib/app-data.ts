@@ -257,9 +257,9 @@ export async function syncTournamentData(schedule: Match[]) {
         awayTeamId: sql`excluded.away_team_id`,
         kickoff: sql`excluded.kickoff`,
         venue: sql`excluded.venue`,
-        homeScore: sql`excluded.home_score`,
-        awayScore: sql`excluded.away_score`,
-        complete: sql`excluded.complete`,
+        homeScore: sql`case when excluded.complete then excluded.home_score else ${matches.homeScore} end`,
+        awayScore: sql`case when excluded.complete then excluded.away_score else ${matches.awayScore} end`,
+        complete: sql`${matches.complete} or excluded.complete`,
       },
     });
 

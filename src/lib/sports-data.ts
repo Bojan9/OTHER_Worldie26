@@ -9,6 +9,10 @@ import {
 const sportsDbKey = process.env.SPORTSDB_API_KEY ?? "123";
 const SPORTS_DB_URL =
   `https://www.thesportsdb.com/api/v1/json/${sportsDbKey}/eventsseason.php?id=4429&s=2026`;
+const SPORTS_DB_ROUND_URLS = [1, 2, 3].map(
+  (round) =>
+    `https://www.thesportsdb.com/api/v1/json/${sportsDbKey}/eventsround.php?id=4429&r=${round}&s=2026`,
+);
 const OPEN_FOOTBALL_URL =
   "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json";
 
@@ -146,6 +150,15 @@ function matchKey(home: Team, away: Team) {
   return `${home.code}:${away.code}`;
 }
 
+async function fetchSportsDbEvents(url: string) {
+  const response = await fetch(url, {
+    next: { revalidate: 300 },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) return [];
+  return responseSchema.parse(await response.json()).events ?? [];
+}
+
 export async function getUpcomingMatches(): Promise<Match[]> {
   try {
     const [scheduleResponse, liveResponse] = await Promise.all([
@@ -153,10 +166,11 @@ export async function getUpcomingMatches(): Promise<Match[]> {
         next: { revalidate: 86_400 },
         signal: AbortSignal.timeout(5_000),
       }),
-      fetch(SPORTS_DB_URL, {
-        next: { revalidate: 21_600 },
-        signal: AbortSignal.timeout(5_000),
-      }).catch(() => null),
+      Promise.all(
+        [SPORTS_DB_URL, ...SPORTS_DB_ROUND_URLS].map((url) =>
+          fetchSportsDbEvents(url).catch(() => []),
+        ),
+      ),
     ]);
     if (!scheduleResponse.ok) throw new Error(`OpenFootball returned ${scheduleResponse.status}`);
 
@@ -177,9 +191,7 @@ export async function getUpcomingMatches(): Promise<Match[]> {
       });
     }
 
-    const liveEvents = liveResponse?.ok
-      ? responseSchema.parse(await liveResponse.json()).events ?? []
-      : [];
+    const liveEvents = liveResponse.flat();
     const liveByMatch = new Map<string, z.infer<typeof eventSchema>>();
     for (const event of liveEvents) {
       const home = findTeam(event.strHomeTeam);
