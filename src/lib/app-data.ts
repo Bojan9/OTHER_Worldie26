@@ -25,6 +25,7 @@ import {
   type Team,
 } from "@/lib/tournament";
 import {
+  actualRoundOf32Participants,
   assignThirdPlaceGroups,
   knockoutMatches,
 } from "@/lib/knockout";
@@ -89,6 +90,8 @@ export type TournamentPredictionData = {
   submittedAt: string;
 };
 
+export type ActualGroupRankingsData = Record<string, string[]>;
+
 export type AwardPlayerData = {
   id: string;
   name: string;
@@ -145,6 +148,7 @@ export type AppData = {
   leaderboard: LeaderboardEntry[];
   currentPlayer: CurrentPlayerStats | null;
   tournamentPrediction: TournamentPredictionData | null;
+  actualGroupRankings: ActualGroupRankingsData;
   tournamentLockTime: string | null;
   tournamentLocked: boolean;
   awardPlayers: AwardPlayerData[];
@@ -488,6 +492,18 @@ async function updateRoundOf32Participants() {
     knockoutMatches
       .filter((match) => match.stage === "Round of 32")
       .map(async (definition) => {
+        const actual = actualRoundOf32Participants[definition.id];
+        if (actual) {
+          await db
+            .update(matches)
+            .set({
+              homeTeamId: actual.home,
+              awayTeamId: actual.away,
+            })
+            .where(eq(matches.id, definition.id));
+          return;
+        }
+
         const resolve = (reference: string) => {
           const direct = reference.match(/^([12])([A-L])$/);
           if (direct) {
@@ -763,6 +779,16 @@ async function getTournamentPrediction(userId: string | null) {
     : null;
 }
 
+async function getActualGroupRankings(): Promise<ActualGroupRankingsData> {
+  if (!process.env.DATABASE_URL) return {};
+  const db = getDb();
+  const rows = await db.select().from(officialGroupStandings);
+
+  return Object.fromEntries(
+    rows.map((standing) => [standing.group, standing.rankings]),
+  );
+}
+
 async function getAwardData(userId: string | null) {
   if (!process.env.DATABASE_URL || !userId) {
     return { awardPlayers: [], awardPrediction: null };
@@ -958,6 +984,7 @@ export async function getAppData(): Promise<AppData> {
       leaderboard: [],
       currentPlayer: null,
       tournamentPrediction: null,
+      actualGroupRankings: {},
       tournamentLockTime: TOURNAMENT_PREDICTION_LOCK_TIME,
       tournamentLocked:
         new Date(currentTime).getTime() >=
@@ -985,10 +1012,11 @@ export async function getAppData(): Promise<AppData> {
   const currentUserData = await syncCurrentUser();
   const userId = currentUserData?.userId ?? null;
   const tournamentLockTime = TOURNAMENT_PREDICTION_LOCK_TIME;
-  const [matchPredictionData, leaderboard, tournamentPrediction, awardData, fantasyTeam, fantasyContext, publicFantasyTeams] = await Promise.all([
+  const [matchPredictionData, leaderboard, tournamentPrediction, actualGroupRankings, awardData, fantasyTeam, fantasyContext, publicFantasyTeams] = await Promise.all([
     getMatchPredictionData(schedule.map((match) => match.id), userId),
     getLeaderboard(userId),
     getTournamentPrediction(userId),
+    getActualGroupRankings(),
     getAwardData(userId),
     getFantasyTeam(userId),
     getFantasyContext(new Date(currentTime)),
@@ -1013,6 +1041,7 @@ export async function getAppData(): Promise<AppData> {
     leaderboard,
     currentPlayer: await getCurrentPlayerStats(userId, leaderboard),
     tournamentPrediction,
+    actualGroupRankings,
     tournamentLockTime,
     tournamentLocked: tournamentLockTime
       ? new Date(currentTime).getTime() >= new Date(tournamentLockTime).getTime()

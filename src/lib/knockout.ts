@@ -54,6 +54,25 @@ export function assignThirdPlaceGroups(selectedGroups: string[]) {
   return place(0) ? result : {};
 }
 
+export const actualRoundOf32Participants: Record<number, { home: string; away: string }> = {
+  73: { home: "RSA", away: "CAN" },
+  74: { home: "GER", away: "PAR" },
+  75: { home: "NED", away: "MAR" },
+  76: { home: "BRA", away: "JPN" },
+  77: { home: "FRA", away: "SWE" },
+  78: { home: "CIV", away: "NOR" },
+  79: { home: "MEX", away: "ECU" },
+  80: { home: "ENG", away: "COD" },
+  81: { home: "USA", away: "BIH" },
+  82: { home: "BEL", away: "SEN" },
+  83: { home: "POR", away: "CRO" },
+  84: { home: "ESP", away: "AUT" },
+  85: { home: "SUI", away: "ALG" },
+  86: { home: "ARG", away: "CPV" },
+  87: { home: "COL", away: "GHA" },
+  88: { home: "AUS", away: "EGY" },
+};
+
 export const knockoutMatches: KnockoutMatchDefinition[] = [
   { id: 73, stage: "Round of 32", date: "28 јуни", kickoff: "2026-06-28T19:00:00Z", venue: "SoFi Stadium", home: "2A", away: "2B" },
   { id: 74, stage: "Round of 32", date: "29 јуни", kickoff: "2026-06-29T20:30:00Z", venue: "Gillette Stadium", home: "1E", away: "3:A/B/C/D/F" },

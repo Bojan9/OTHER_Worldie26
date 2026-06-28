@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin-auth";
 import {
+  actualRoundOf32Participants,
   assignThirdPlaceGroups,
   getDescendantMatchIds,
   knockoutMatches,
@@ -259,6 +260,30 @@ async function updateRoundOf32Participants() {
       : {};
 
   for (const definition of knockoutMatches.filter((match) => match.stage === "Round of 32")) {
+    const actual = actualRoundOf32Participants[definition.id];
+    if (actual) {
+      const [stored] = await db
+        .select()
+        .from(matches)
+        .where(eq(matches.id, definition.id))
+        .limit(1);
+      const participantChanged =
+        stored?.homeTeamId !== actual.home ||
+        stored?.awayTeamId !== actual.away;
+      if (participantChanged) await clearDependentKnockoutResults(definition.id);
+      await db
+        .update(matches)
+        .set({
+          homeTeamId: actual.home,
+          awayTeamId: actual.away,
+          ...(participantChanged
+            ? { homeScore: null, awayScore: null, winnerTeamId: null, complete: false }
+            : {}),
+        })
+        .where(eq(matches.id, definition.id));
+      continue;
+    }
+
     const resolve = (reference: string) => {
       const direct = reference.match(/^([12])([A-L])$/);
       if (direct) {

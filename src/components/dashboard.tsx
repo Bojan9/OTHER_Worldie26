@@ -743,7 +743,7 @@ export function Dashboard({ data }: { data: AppData }) {
         {section === "Dashboard" ? <Overview setSection={setSection} nextMatches={data.nextMatches} stats={data.currentPlayer} leaderboard={data.leaderboard} configured={data.configured} /> : null}
         {section === "Tournament"
           ? data.signedIn
-            ? <TournamentGame signedIn configured={data.configured} savedPrediction={data.tournamentPrediction} tournamentLockTime={data.tournamentLockTime} tournamentLocked={data.tournamentLocked} otherPlayers={data.leaderboard.filter((player) => !player.current)} />
+            ? <TournamentGame signedIn configured={data.configured} savedPrediction={data.tournamentPrediction} actualGroupRankings={data.actualGroupRankings} tournamentLockTime={data.tournamentLockTime} tournamentLocked={data.tournamentLocked} otherPlayers={data.leaderboard.filter((player) => !player.current)} />
             : <SignInRequired section="Турнир" configured={data.configured} />
           : null}
         {section === "Fantasy"

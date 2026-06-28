@@ -11,7 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { PublicTournamentPredictions } from "@/components/public-tournament-predictions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TeamFlag } from "@/components/team-flag";
-import type { LeaderboardEntry, TournamentPredictionData } from "@/lib/app-data";
+import type { ActualGroupRankingsData, LeaderboardEntry, TournamentPredictionData } from "@/lib/app-data";
 import {
   assignThirdPlaceGroups,
   bracketMatchOrder,
@@ -402,10 +402,93 @@ function TournamentPreview({
   );
 }
 
+function ActualGroupPhase({
+  actualGroupRankings,
+  prediction,
+}: {
+  actualGroupRankings: ActualGroupRankingsData;
+  prediction: TournamentPredictionData;
+}) {
+  const completedGroups = groups.filter((group) => actualGroupRankings[group.id]?.length === 4);
+  const totalTeamPoints = completedGroups.reduce(
+    (total, group) =>
+      total +
+      actualGroupRankings[group.id].filter(
+        (teamCode, index) => prediction.groupRankings[group.id]?.[index] === teamCode,
+      ).length * 2,
+    0,
+  );
+  const perfectGroupPoints = completedGroups.reduce((total, group) => {
+    const actual = actualGroupRankings[group.id];
+    const predicted = prediction.groupRankings[group.id] ?? [];
+    return actual.every((teamCode, index) => predicted[index] === teamCode)
+      ? total + 2
+      : total;
+  }, 0);
+
+  if (completedGroups.length === 0) return null;
+
+  return (
+    <section className="mt-8">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+        <div>
+          <h2 className="text-2xl font-black text-white">Actual group phase</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Points from finished group standings: +2 for every team in the exact position, plus +2 for a perfect group.
+          </p>
+        </div>
+        <div className="flex gap-2 text-sm font-black">
+          <span className="bg-cyan-300/10 px-3 py-2 text-cyan-200">{totalTeamPoints} position pts</span>
+          <span className="bg-lime-300/10 px-3 py-2 text-lime-200">{perfectGroupPoints} bonus pts</span>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {completedGroups.map((group) => {
+          const actual = actualGroupRankings[group.id];
+          const predicted = prediction.groupRankings[group.id] ?? [];
+          const perfect = actual.every((teamCode, index) => predicted[index] === teamCode);
+
+          return (
+            <Card key={group.id} className="gap-0 overflow-hidden border-white/10 bg-white/4.5 py-0 text-white shadow-none">
+              <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                <h3 className="font-black">Group {group.id}</h3>
+                <span className={cn("text-xs font-black", perfect ? "text-lime-300" : "text-slate-500")}>
+                  {perfect ? "+2 perfect group" : "No group bonus"}
+                </span>
+              </div>
+              <div className="p-2">
+                {actual.map((teamCode, index) => {
+                  const team = teamsByCode.get(teamCode);
+                  if (!team) return null;
+                  const points = predicted[index] === teamCode ? 2 : 0;
+
+                  return (
+                    <div key={teamCode} className="flex items-center gap-3 p-2">
+                      <span className={cn("grid size-6 place-items-center rounded-md text-xs font-black", index < 2 ? "bg-lime-300 text-slate-950" : index === 2 ? "bg-cyan-300/15 text-cyan-300" : "bg-white/5 text-slate-500")}>
+                        {index + 1}
+                      </span>
+                      <TeamFlag team={team} />
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{team.name}</span>
+                      <span className={cn("min-w-10 text-right font-mono text-sm font-black", points > 0 ? "text-lime-300" : "text-slate-600")}>
+                        +{points}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function TournamentGame({
   signedIn,
   configured,
   savedPrediction,
+  actualGroupRankings,
   tournamentLockTime,
   tournamentLocked,
   otherPlayers,
@@ -413,6 +496,7 @@ export function TournamentGame({
   signedIn: boolean;
   configured: boolean;
   savedPrediction: TournamentPredictionData | null;
+  actualGroupRankings: ActualGroupRankingsData;
   tournamentLockTime: string | null;
   tournamentLocked: boolean;
   otherPlayers: LeaderboardEntry[];
@@ -521,6 +605,12 @@ export function TournamentGame({
 
       {submitted ? (
         <>
+          {savedPrediction ? (
+            <ActualGroupPhase
+              actualGroupRankings={actualGroupRankings}
+              prediction={savedPrediction}
+            />
+          ) : null}
           <TournamentPreview
             champion={champion}
             runnerUp={runnerUp}
