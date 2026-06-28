@@ -594,7 +594,7 @@ export function TournamentGame({
         <div className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm">
           <p className="font-bold text-amber-200">
             {tournamentLockTime
-              ? `Се заклучува на ${new Date(tournamentLockTime).toLocaleString("mk-MK", { timeZone: "Europe/Warsaw" })} по варшавско време`
+              ? `Се заклучува на ${new Date(tournamentLockTime).toLocaleString("mk-MK", { timeZone: "Europe/Skopje" })} по скопско време`
               : "Времето за заклучување не е достапно"}
           </p>
           <p className="text-xs text-slate-400">До тогаш можеш да го ресетираш и повторно да го пополниш предвидувањето.</p>

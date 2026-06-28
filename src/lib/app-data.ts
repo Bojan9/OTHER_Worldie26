@@ -20,6 +20,7 @@ import { getUpcomingMatches } from "@/lib/sports-data";
 import { scoreMatchPrediction, scoreTournamentPrediction } from "@/lib/scoring";
 import {
   groups,
+  officialGroupRankingOverrides,
   TOURNAMENT_PREDICTION_LOCK_TIME,
   type Match,
   type Team,
@@ -224,7 +225,14 @@ async function ensureKnockoutFixtures() {
         venue: match.venue,
       })),
     )
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: matches.id,
+      set: {
+        stage: sql`excluded.stage`,
+        kickoff: sql`excluded.kickoff`,
+        venue: sql`excluded.venue`,
+      },
+    });
 }
 
 export async function syncCurrentUser() {
@@ -433,8 +441,22 @@ async function syncOfficialGroupStandings() {
       .filter((table): table is NonNullable<typeof table> => Boolean(table));
 
   await Promise.all(
+    Object.entries(officialGroupRankingOverrides).map(([group, rankings]) =>
+      db
+        .insert(officialGroupStandings)
+        .values({ group, rankings })
+        .onConflictDoUpdate({
+          target: officialGroupStandings.group,
+          set: { rankings, updatedAt: new Date() },
+        }),
+    ),
+  );
+
+  await Promise.all(
     tables
-      .filter((table) => table.completeMatches >= 6)
+      .filter(
+        (table) => table.completeMatches >= 6 && !officialGroupRankingOverrides[table.groupId],
+      )
       .map((table) =>
         db
           .insert(officialGroupStandings)

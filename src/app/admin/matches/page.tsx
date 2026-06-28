@@ -1,5 +1,3 @@
-import { format } from "date-fns";
-import { mk } from "date-fns/locale";
 import { updateMatchResult } from "@/app/admin/actions";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -15,6 +13,15 @@ const stageLabels = {
   third_place: "Трето место",
   final: "Финале",
 } as const;
+
+const skopjeDateTimeFormatter = new Intl.DateTimeFormat("mk-MK", {
+  timeZone: "Europe/Skopje",
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 
 export default async function AdminMatchesPage() {
   const data = await getAdminData();
@@ -40,7 +47,7 @@ export default async function AdminMatchesPage() {
                     <p className="text-[10px] uppercase text-slate-500">{stageLabels[match.stage]}</p>
                   </div>
                   <div className="text-xs text-slate-500">
-                    {format(match.kickoff, "d MMM, HH:mm", { locale: mk })}
+                    {skopjeDateTimeFormatter.format(match.kickoff)} Skopje
                     <br />
                     {started ? (match.complete ? "Резултатот е зачуван" : "Достапно") : "Заклучено до почетокот"}
                   </div>

@@ -27,8 +27,6 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { format } from "date-fns";
-import { mk } from "date-fns/locale";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,6 +73,40 @@ const knockoutStageOptions = [
   "third_place",
   "final",
 ] as const;
+
+const skopjeDateFormatter = new Intl.DateTimeFormat("mk-MK", {
+  timeZone: "Europe/Skopje",
+  day: "numeric",
+  month: "short",
+});
+
+const skopjeTimeFormatter = new Intl.DateTimeFormat("mk-MK", {
+  timeZone: "Europe/Skopje",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+const skopjeDateTimeFormatter = new Intl.DateTimeFormat("mk-MK", {
+  timeZone: "Europe/Skopje",
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function formatSkopjeDate(value: string | Date) {
+  return skopjeDateFormatter.format(new Date(value));
+}
+
+function formatSkopjeTime(value: string | Date) {
+  return skopjeTimeFormatter.format(new Date(value));
+}
+
+function formatSkopjeDateTime(value: string | Date) {
+  return skopjeDateTimeFormatter.format(new Date(value));
+}
 
 function Brand() {
   return (
@@ -345,8 +377,8 @@ function Overview({
             {nextMatches.map((match) => (
               <div key={match.id} className="flex flex-col gap-4 rounded-2xl border border-white/8 bg-black/15 p-4 sm:flex-row sm:items-center">
                 <div className="w-24 shrink-0">
-                  <p className="text-xs font-bold text-slate-400">{format(new Date(match.kickoff), "d MMM", { locale: mk })}</p>
-                  <p className="text-sm text-slate-500">{format(new Date(match.kickoff), "HH:mm 'UTC'")}</p>
+                  <p className="text-xs font-bold text-slate-400">{formatSkopjeDate(match.kickoff)}</p>
+                  <p className="text-sm text-slate-500">{formatSkopjeTime(match.kickoff)} Skopje</p>
                 </div>
                 <div className="flex flex-1 items-center gap-3">
                   <TeamFlag team={match.home} size={30} />
@@ -356,7 +388,7 @@ function Overview({
                   <TeamFlag team={match.away} size={30} />
                 </div>
                 <Badge variant="outline" className="w-fit border-white/10 text-slate-400">
-                  <Clock3 className="size-3" /> Се затвора {format(new Date(new Date(match.kickoff).getTime() - 10 * 60 * 1000), "d MMM, HH:mm 'UTC'", { locale: mk })}
+                  <Clock3 className="size-3" /> Се затвора {formatSkopjeDateTime(new Date(new Date(match.kickoff).getTime() - 10 * 60 * 1000))} Skopje
                 </Badge>
               </div>
             ))}
@@ -461,8 +493,8 @@ function MatchRow({
         <div className="flex w-36 shrink-0 items-center gap-3">
           <div className="grid size-10 place-items-center rounded-xl bg-white/5 text-slate-400"><CalendarDays className="size-5" /></div>
           <div>
-            <p className="text-sm font-bold">{format(new Date(match.kickoff), "d MMM", { locale: mk })}</p>
-            <p className="text-xs text-slate-500">{format(new Date(match.kickoff), "HH:mm 'UTC'")}</p>
+            <p className="text-sm font-bold">{formatSkopjeDate(match.kickoff)}</p>
+            <p className="text-xs text-slate-500">{formatSkopjeTime(match.kickoff)} Skopje</p>
           </div>
         </div>
         <div className="grid flex-1 grid-cols-[1fr_auto_1fr] items-center gap-3">
@@ -496,7 +528,7 @@ function MatchRow({
         <div className="flex w-full shrink-0 items-center justify-between gap-3 md:w-56 md:justify-end">
           <div className="text-right">
             <p className={cn("text-xs font-bold", finished ? "text-lime-300" : "text-slate-400")}>
-              {finished ? "Завршен" : predictionClosed ? "Предвидувањето е затворено" : `Се затвора ${format(new Date(new Date(match.kickoff).getTime() - 10 * 60 * 1000), "d MMM, HH:mm", { locale: mk })}`}
+              {finished ? "Завршен" : predictionClosed ? "Предвидувањето е затворено" : `Се затвора ${formatSkopjeDateTime(new Date(new Date(match.kickoff).getTime() - 10 * 60 * 1000))} Skopje`}
             </p>
             <p className="text-[11px] text-slate-600">{matchContext} · {match.venue}</p>
           </div>
@@ -626,7 +658,7 @@ function MatchGame({
       </div>
       <div className="mt-5 flex items-start gap-3 rounded-xl border border-white/8 bg-white/3 p-4 text-sm text-slate-400">
         <CircleHelp className="mt-0.5 size-4 shrink-0 text-cyan-300" />
-        Предвидувањата може да се менуваат до 10 минути пред почетокот. Сите времиња се прикажани во UTC.
+        Предвидувањата може да се менуваат до 10 минути пред почетокот. Сите времиња се прикажани според време во Скопје.
       </div>
     </div>
   );

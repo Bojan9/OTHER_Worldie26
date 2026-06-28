@@ -46,6 +46,12 @@ export const groups: TournamentGroup[] = [
   { id: "L", teams: [team("ENG", "Англија", "🏴"), team("CRO", "Хрватска", "🇭🇷"), team("GHA", "Гана", "🇬🇭"), team("PAN", "Панама", "🇵🇦")] },
 ];
 
+export const officialGroupRankingOverrides: Record<string, string[]> = {
+  A: ["MEX", "RSA", "KOR", "CZE"],
+  F: ["NED", "JPN", "SWE", "TUN"],
+  G: ["BEL", "EGY", "IRN", "NZL"],
+};
+
 export const byCode = new Map(groups.flatMap((group) => group.teams).map((item) => [item.code, item]));
 const getTeam = (code: string) => byCode.get(code)!;
 

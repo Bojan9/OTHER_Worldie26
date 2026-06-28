@@ -37,7 +37,14 @@ export async function ensureKnockoutFixtures() {
         venue: match.venue,
       })),
     )
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: matches.id,
+      set: {
+        stage: sql`excluded.stage`,
+        kickoff: sql`excluded.kickoff`,
+        venue: sql`excluded.venue`,
+      },
+    });
 }
 
 export async function getAdminData() {

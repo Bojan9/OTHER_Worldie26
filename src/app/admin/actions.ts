@@ -25,7 +25,7 @@ import {
   scoreMatchPrediction,
   scoreTournamentPrediction,
 } from "@/lib/scoring";
-import { groups } from "@/lib/tournament";
+import { groups, officialGroupRankingOverrides } from "@/lib/tournament";
 
 const matchResultSchema = z.object({
   matchId: z.coerce.number().int().positive(),
@@ -326,12 +326,13 @@ async function updateGroupTable(groupId: string) {
   const db = getDb();
   const table = await calculateGroupTable(groupId);
   if (!table) return;
+  const rankings = officialGroupRankingOverrides[groupId] ?? table.rankings;
   await db
     .insert(officialGroupStandings)
-    .values({ group: groupId, rankings: table.rankings })
+    .values({ group: groupId, rankings })
     .onConflictDoUpdate({
       target: officialGroupStandings.group,
-      set: { rankings: table.rankings, updatedAt: new Date() },
+      set: { rankings, updatedAt: new Date() },
     });
   await updateRoundOf32Participants();
 }
