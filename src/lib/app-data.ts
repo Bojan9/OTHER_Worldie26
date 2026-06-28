@@ -8,6 +8,7 @@ import {
   fantasyTeams,
   matchPredictions,
   matches,
+  officialGroupStandings,
   players,
   teams,
   tournamentPredictions,
@@ -16,12 +17,17 @@ import {
 import { ADMIN_EMAIL } from "@/lib/admin-auth";
 import { syncWorldCupPlayers } from "@/lib/squad-data";
 import { getUpcomingMatches } from "@/lib/sports-data";
-import { scoreMatchPrediction } from "@/lib/scoring";
+import { scoreMatchPrediction, scoreTournamentPrediction } from "@/lib/scoring";
 import {
   groups,
   TOURNAMENT_PREDICTION_LOCK_TIME,
   type Match,
+  type Team,
 } from "@/lib/tournament";
+import {
+  assignThirdPlaceGroups,
+  knockoutMatches,
+} from "@/lib/knockout";
 import {
   countFantasyTransfers,
   type FantasyPeriod,
@@ -168,6 +174,55 @@ function initials(name: string) {
     .join("") || "WP";
 }
 
+const stageMap = {
+  "Round of 32": "round_of_32",
+  "Round of 16": "round_of_16",
+  "Quarter-finals": "quarter_final",
+  "Semi-finals": "semi_final",
+  "Medal matches": "final",
+} as const;
+
+const teamsByCode = new Map(
+  groups.flatMap((group) => group.teams.map((team) => [team.code, team] as const)),
+);
+
+function teamFromRow(row: { id: string; name: string; flag: string } | undefined): Team | null {
+  if (!row) return null;
+  return {
+    code: row.id,
+    name: row.name,
+    flag: row.flag,
+  };
+}
+
+function matchStageLabel(stage: NonNullable<Match["stage"]>) {
+  return {
+    group: "Group",
+    round_of_32: "Round of 32",
+    round_of_16: "Round of 16",
+    quarter_final: "Quarter-final",
+    semi_final: "Semi-final",
+    third_place: "Third place",
+    final: "Final",
+  }[stage];
+}
+
+async function ensureKnockoutFixtures() {
+  if (!process.env.DATABASE_URL) return;
+  const db = getDb();
+  await db
+    .insert(matches)
+    .values(
+      knockoutMatches.map((match) => ({
+        id: match.id,
+        stage: match.id === 103 ? "third_place" as const : stageMap[match.stage],
+        kickoff: new Date(match.kickoff),
+        venue: match.venue,
+      })),
+    )
+    .onConflictDoNothing();
+}
+
 export async function syncCurrentUser() {
   if (!isAppConfigured()) return null;
   const { userId } = await auth();
@@ -302,6 +357,212 @@ export async function syncTournamentData(schedule: Match[]) {
         );
     }),
   );
+}
+
+async function calculateGroupTable(groupId: string) {
+  const db = getDb();
+  const group = groups.find((item) => item.id === groupId);
+  if (!group) return null;
+
+  const groupMatches = await db
+    .select()
+    .from(matches)
+    .where(and(eq(matches.stage, "group"), eq(matches.group, groupId)));
+  const stats = new Map(
+    group.teams.map((team) => [
+      team.code,
+      { teamId: team.code, points: 0, goalDifference: 0, goalsFor: 0, wins: 0 },
+    ]),
+  );
+
+  for (const match of groupMatches) {
+    if (
+      !match.complete ||
+      !match.homeTeamId ||
+      !match.awayTeamId ||
+      match.homeScore == null ||
+      match.awayScore == null
+    ) {
+      continue;
+    }
+    const home = stats.get(match.homeTeamId);
+    const away = stats.get(match.awayTeamId);
+    if (!home || !away) continue;
+
+    home.goalsFor += match.homeScore;
+    away.goalsFor += match.awayScore;
+    home.goalDifference += match.homeScore - match.awayScore;
+    away.goalDifference += match.awayScore - match.homeScore;
+    if (match.homeScore > match.awayScore) {
+      home.points += 3;
+      home.wins += 1;
+    } else if (match.awayScore > match.homeScore) {
+      away.points += 3;
+      away.wins += 1;
+    } else {
+      home.points += 1;
+      away.points += 1;
+    }
+  }
+
+  const sorted = [...stats.values()].sort(
+    (a, b) =>
+      b.points - a.points ||
+      b.goalDifference - a.goalDifference ||
+      b.goalsFor - a.goalsFor ||
+      b.wins - a.wins ||
+      a.teamId.localeCompare(b.teamId),
+  );
+
+  return {
+    groupId,
+    completeMatches: groupMatches.filter((match) => match.complete).length,
+    rankings: sorted.map((team) => team.teamId),
+    stats: sorted,
+  };
+}
+
+async function syncOfficialGroupStandings() {
+  if (!process.env.DATABASE_URL) return;
+  const db = getDb();
+  const tables = (await Promise.all(groups.map((group) => calculateGroupTable(group.id))))
+      .filter((table): table is NonNullable<typeof table> => Boolean(table));
+
+  await Promise.all(
+    tables
+      .filter((table) => table.completeMatches >= 6)
+      .map((table) =>
+        db
+          .insert(officialGroupStandings)
+          .values({ group: table.groupId, rankings: table.rankings })
+          .onConflictDoNothing(),
+      ),
+  );
+}
+
+async function updateRoundOf32Participants() {
+  if (!process.env.DATABASE_URL) return;
+  const db = getDb();
+  const [calculatedTables, officialRows] = await Promise.all([
+    Promise.all(groups.map((group) => calculateGroupTable(group.id))),
+    db.select().from(officialGroupStandings),
+  ]);
+  const officialByGroup = new Map(
+    officialRows.map((standing) => [standing.group, standing.rankings]),
+  );
+  const completedGroups = new Map(
+    calculatedTables
+      .filter((table): table is NonNullable<typeof table> => Boolean(table))
+      .filter((table) => table.completeMatches >= 6)
+      .map((table) => [
+        table.groupId,
+        {
+          ...table,
+          rankings: officialByGroup.get(table.groupId) ?? table.rankings,
+        },
+      ]),
+  );
+
+  const thirdPlaceAssignments =
+    completedGroups.size === 12
+      ? assignThirdPlaceGroups(
+          [...completedGroups.entries()]
+            .sort(
+              ([groupA, a], [groupB, b]) =>
+                (b.stats.find((team) => team.teamId === b.rankings[2])?.points ?? 0) -
+                  (a.stats.find((team) => team.teamId === a.rankings[2])?.points ?? 0) ||
+                (b.stats.find((team) => team.teamId === b.rankings[2])?.goalDifference ?? 0) -
+                  (a.stats.find((team) => team.teamId === a.rankings[2])?.goalDifference ?? 0) ||
+                (b.stats.find((team) => team.teamId === b.rankings[2])?.goalsFor ?? 0) -
+                  (a.stats.find((team) => team.teamId === a.rankings[2])?.goalsFor ?? 0) ||
+                (b.stats.find((team) => team.teamId === b.rankings[2])?.wins ?? 0) -
+                  (a.stats.find((team) => team.teamId === a.rankings[2])?.wins ?? 0) ||
+                groupA.localeCompare(groupB),
+            )
+            .slice(0, 8)
+            .map(([group]) => group),
+        )
+      : {};
+
+  await Promise.all(
+    knockoutMatches
+      .filter((match) => match.stage === "Round of 32")
+      .map(async (definition) => {
+        const resolve = (reference: string) => {
+          const direct = reference.match(/^([12])([A-L])$/);
+          if (direct) {
+            const table = completedGroups.get(direct[2]);
+            return table?.rankings[Number(direct[1]) - 1];
+          }
+          if (reference.startsWith("3:")) {
+            const groupId = thirdPlaceAssignments[definition.id];
+            return groupId ? completedGroups.get(groupId)?.rankings[2] : undefined;
+          }
+          return undefined;
+        };
+        const homeTeamId = resolve(definition.home);
+        const awayTeamId = resolve(definition.away);
+        if (!homeTeamId && !awayTeamId) return;
+
+        await db
+          .update(matches)
+          .set({
+            ...(homeTeamId ? { homeTeamId } : {}),
+            ...(awayTeamId ? { awayTeamId } : {}),
+          })
+          .where(eq(matches.id, definition.id));
+      }),
+  );
+}
+
+async function recalculateTournamentPoints() {
+  if (!process.env.DATABASE_URL) return;
+  const db = getDb();
+  const [standingRows, completedGroupMatches, [finalMatch], predictions] = await Promise.all([
+    db.select().from(officialGroupStandings),
+    db
+      .select({ group: matches.group })
+      .from(matches)
+      .where(and(eq(matches.stage, "group"), eq(matches.complete, true))),
+    db
+      .select({ winnerTeamId: matches.winnerTeamId })
+      .from(matches)
+      .where(eq(matches.id, 104))
+      .limit(1),
+    db.select().from(tournamentPredictions),
+  ]);
+  const completedByGroup = new Map<string, number>();
+  for (const match of completedGroupMatches) {
+    if (match.group) completedByGroup.set(match.group, (completedByGroup.get(match.group) ?? 0) + 1);
+  }
+  const actualGroups = Object.fromEntries(
+    standingRows
+      .filter((standing) => (completedByGroup.get(standing.group) ?? 0) >= 6)
+      .map((standing) => [standing.group, standing.rankings]),
+  );
+
+  await Promise.all(
+    predictions.map((prediction) =>
+      db
+        .update(tournamentPredictions)
+        .set({
+          points: scoreTournamentPrediction(
+            prediction.groupRankings,
+            actualGroups,
+            prediction.bracket["104"],
+            finalMatch?.winnerTeamId ?? undefined,
+          ).total,
+        })
+        .where(eq(tournamentPredictions.userId, prediction.userId)),
+    ),
+  );
+}
+
+async function syncTournamentProgression() {
+  await ensureKnockoutFixtures();
+  await syncOfficialGroupStandings();
+  await updateRoundOf32Participants();
+  await recalculateTournamentPoints();
 }
 
 async function getMatchPredictionData(matchIds: number[], userId: string | null) {
@@ -626,6 +887,44 @@ async function applyPersistedResults(schedule: Match[]) {
   });
 }
 
+async function getPredictionSchedule(fallbackSchedule: Match[]) {
+  if (!process.env.DATABASE_URL) return fallbackSchedule;
+  const db = getDb();
+  const [storedMatches, teamRows] = await Promise.all([
+    db.select().from(matches).orderBy(asc(matches.kickoff), asc(matches.id)),
+    db.select().from(teams),
+  ]);
+  const storedTeamById = new Map(teamRows.map((team) => [team.id, team]));
+  const schedule = storedMatches
+    .map((match): Match | null => {
+      const home = teamFromRow(
+        match.homeTeamId ? storedTeamById.get(match.homeTeamId) : undefined,
+      ) ?? (match.homeTeamId ? teamsByCode.get(match.homeTeamId) ?? null : null);
+      const away = teamFromRow(
+        match.awayTeamId ? storedTeamById.get(match.awayTeamId) : undefined,
+      ) ?? (match.awayTeamId ? teamsByCode.get(match.awayTeamId) ?? null : null);
+      if (!home || !away) return null;
+
+      const groupMatch = fallbackSchedule.find((item) => item.id === match.id);
+      return {
+        id: match.id,
+        stage: match.stage,
+        group: match.group,
+        round: groupMatch?.round ?? null,
+        home,
+        away,
+        kickoff: match.kickoff.toISOString(),
+        venue: match.venue,
+        homeScore: match.homeScore,
+        awayScore: match.awayScore,
+        status: match.complete ? "Match Finished" : matchStageLabel(match.stage),
+      };
+    })
+    .filter((match): match is Match => Boolean(match));
+
+  return schedule.length > 0 ? schedule : fallbackSchedule;
+}
+
 export async function getAppData(): Promise<AppData> {
   let schedule = await getUpcomingMatches();
   const currentTime = new Date().toISOString();
@@ -675,12 +974,14 @@ export async function getAppData(): Promise<AppData> {
   }
 
   await syncTournamentData(schedule);
+  await syncTournamentProgression();
   try {
     await syncWorldCupPlayers();
   } catch (error) {
     console.error("Player squad sync failed", error);
   }
   schedule = await applyPersistedResults(schedule);
+  schedule = await getPredictionSchedule(schedule);
   const currentUserData = await syncCurrentUser();
   const userId = currentUserData?.userId ?? null;
   const tournamentLockTime = TOURNAMENT_PREDICTION_LOCK_TIME;

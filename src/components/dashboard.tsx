@@ -57,6 +57,25 @@ const nav = [
   { id: "Leaderboard", label: "Табела" },
 ];
 
+const matchStageLabels: Record<NonNullable<Match["stage"]>, string> = {
+  group: "Group",
+  round_of_32: "Round of 32",
+  round_of_16: "Round of 16",
+  quarter_final: "Quarter-final",
+  semi_final: "Semi-final",
+  third_place: "Third place",
+  final: "Final",
+};
+
+const knockoutStageOptions = [
+  "round_of_32",
+  "round_of_16",
+  "quarter_final",
+  "semi_final",
+  "third_place",
+  "final",
+] as const;
+
 function Brand() {
   return (
     <div className="flex items-center gap-3">
@@ -400,6 +419,10 @@ function MatchRow({
     /finished|full time|after penalties|ft/i.test(match.status ?? "");
   const predictionClosed = new Date(currentTime).getTime() > new Date(match.kickoff).getTime() - 10 * 60 * 1000;
   const canSave = configured && signedIn && !predictionClosed && home !== "" && away !== "";
+  const matchContext =
+    match.stage === "group" || !match.stage
+      ? `Group ${match.group ?? ""}`
+      : matchStageLabels[match.stage];
   const save = () => {
     if (!canSave || pending || saved) return;
     setError("");
@@ -475,7 +498,7 @@ function MatchRow({
             <p className={cn("text-xs font-bold", finished ? "text-lime-300" : "text-slate-400")}>
               {finished ? "Завршен" : predictionClosed ? "Предвидувањето е затворено" : `Се затвора ${format(new Date(new Date(match.kickoff).getTime() - 10 * 60 * 1000), "d MMM, HH:mm", { locale: mk })}`}
             </p>
-            <p className="text-[11px] text-slate-600">Група {match.group} · {match.venue}</p>
+            <p className="text-[11px] text-slate-600">{matchContext} · {match.venue}</p>
           </div>
           <div className="flex items-center gap-1">
             {!finished ? <Button
@@ -560,14 +583,17 @@ function MatchGame({
   configured: boolean;
   currentTime: string;
 }) {
-  const [mode, setMode] = useState<"group" | "round">("group");
+  const [mode, setMode] = useState<"group" | "round" | "knockout">("knockout");
   const [group, setGroup] = useState("A");
   const [round, setRound] = useState<1 | 2 | 3>(1);
+  const [stage, setStage] = useState<(typeof knockoutStageOptions)[number]>("round_of_32");
   const visible = useMemo(
     () => mode === "group"
       ? matches.filter((match) => match.group === group)
-      : matches.filter((match) => match.round === round),
-    [group, matches, mode, round],
+      : mode === "round"
+        ? matches.filter((match) => match.round === round)
+        : matches.filter((match) => match.stage === stage),
+    [group, matches, mode, round, stage],
   );
   return (
     <div>
@@ -577,6 +603,7 @@ function MatchGame({
           <p className="mt-2 text-slate-400">2 поени за точен исход. 5 поени за точен резултат.</p>
         </div>
         <div className="flex gap-2">
+          <Button size="sm" onClick={() => setMode("knockout")} className={mode === "knockout" ? "bg-lime-300 text-slate-950 hover:bg-lime-200" : "bg-white/10 text-slate-400"}>Knockout</Button>
           <Button size="sm" onClick={() => setMode("group")} className={mode === "group" ? "bg-lime-300 text-slate-950 hover:bg-lime-200" : "bg-white/10 text-slate-400"}>По група</Button>
           <Button size="sm" onClick={() => setMode("round")} className={mode === "round" ? "bg-lime-300 text-slate-950 hover:bg-lime-200" : "bg-white/10 text-slate-400"}>По коло</Button>
         </div>
@@ -586,8 +613,11 @@ function MatchGame({
           ? "ABCDEFGHIJKL".split("").map((item) => (
             <Button key={item} size="sm" variant="outline" onClick={() => setGroup(item)} className={group === item ? "border-lime-300 bg-lime-300/10 text-lime-300" : "border-white/10 bg-white/3 text-slate-500"}>Група {item}</Button>
           ))
-          : ([1, 2, 3] as const).map((item) => (
+          : mode === "round" ? ([1, 2, 3] as const).map((item) => (
             <Button key={item} size="sm" variant="outline" onClick={() => setRound(item)} className={round === item ? "border-lime-300 bg-lime-300/10 text-lime-300" : "border-white/10 bg-white/3 text-slate-500"}>Коло {item}</Button>
+          ))
+          : knockoutStageOptions.map((item) => (
+            <Button key={item} size="sm" variant="outline" onClick={() => setStage(item)} className={stage === item ? "border-lime-300 bg-lime-300/10 text-lime-300" : "border-white/10 bg-white/3 text-slate-500"}>{matchStageLabels[item]}</Button>
           ))}
         <span className="ml-auto text-xs font-bold text-slate-500">{visible.length} натпревари</span>
       </div>

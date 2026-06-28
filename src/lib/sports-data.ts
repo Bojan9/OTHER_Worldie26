@@ -212,6 +212,7 @@ export async function getUpcomingMatches(): Promise<Match[]> {
 
     const byGroup = new Map<string, Match[]>();
     for (const match of matches) {
+      if (!match.group) continue;
       const groupMatches = byGroup.get(match.group) ?? [];
       groupMatches.push(match);
       byGroup.set(match.group, groupMatches);

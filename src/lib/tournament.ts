@@ -11,8 +11,9 @@ export type TournamentGroup = {
 
 export type Match = {
   id: number;
-  group: string;
-  round: 1 | 2 | 3;
+  stage?: "group" | "round_of_32" | "round_of_16" | "quarter_final" | "semi_final" | "third_place" | "final";
+  group?: string | null;
+  round?: 1 | 2 | 3 | null;
   home: Team;
   away: Team;
   kickoff: string;

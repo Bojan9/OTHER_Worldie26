@@ -108,7 +108,7 @@ async function recalculateTournamentPoints() {
   }
   const actualGroups = Object.fromEntries(
     standingRows
-      .filter((standing) => completedByGroup.get(standing.group) === 6)
+      .filter((standing) => (completedByGroup.get(standing.group) ?? 0) >= 6)
       .map((standing) => [standing.group, standing.rankings]),
   );
 
@@ -227,7 +227,7 @@ async function updateRoundOf32Participants() {
   );
   const completedGroups = new Map(
     tables
-      .filter((table) => table.completeMatches === 6)
+      .filter((table) => table.completeMatches >= 6)
       .map((table) => [
         table.groupId,
         {
